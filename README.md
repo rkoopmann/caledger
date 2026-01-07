@@ -30,6 +30,8 @@ caledger ls [OPTIONS]
 | `-n, --notes` | Include event notes appended to title |
 | `-b, --break` | Add date headers between days |
 | `--nomap` | Skip title mappings from config |
+| `--config-back` | Merge all configs, distant/parent wins conflicts |
+| `--config-forward` | Merge all configs, closer/local wins conflicts |
 | `-h, --help` | Show help |
 
 ### Relative Dates
@@ -73,7 +75,15 @@ caledger map rm <key>        # remove mapping
 
 ## Configuration File
 
-Create `~/.caledger` to set defaults:
+Caledger looks for a `.caledger` file by traversing up from the current directory. If none is found, it falls back to `~/.caledger`. This allows project-specific configurations.
+
+By default, only the closest config file is loaded. Use `--config-back` or `--config-forward` to merge multiple config files:
+
+- **Default**: Load closest `.caledger` only
+- **`--config-back`**: Merge all configs; distant/parent settings win conflicts
+- **`--config-forward`**: Merge all configs; closer/local settings win conflicts
+
+Create `.caledger` in your project or home directory:
 
 ```
 ; Settings

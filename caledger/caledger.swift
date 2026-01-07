@@ -43,17 +43,131 @@ struct Config {
     var mappings: [String: String] = [:]  // Event title -> replacement mappings
     var duplicateMappingKeys: [String] = []  // Keys that appeared more than once
 
-    static let configPath = FileManager.default.homeDirectoryForCurrentUser
+    static let homeConfigPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".caledger")
 
-    /// Load configuration from ~/.caledger
-    /// Returns default config if file doesn't exist or can't be read
-    static func load() -> Config {
-        var config = Config()
+    /// Find all .caledger files from cwd up to home (closest first)
+    static func findAllConfigPaths() -> [URL] {
+        let fileManager = FileManager.default
+        var currentDir = URL(fileURLWithPath: fileManager.currentDirectoryPath)
+        var paths: [URL] = []
 
-        guard let contents = try? String(contentsOf: configPath, encoding: .utf8) else {
+        // Traverse up looking for .caledger files
+        while true {
+            let configFile = currentDir.appendingPathComponent(".caledger")
+            if fileManager.fileExists(atPath: configFile.path) {
+                paths.append(configFile)
+            }
+
+            let parent = currentDir.deletingLastPathComponent()
+            if parent.path == currentDir.path {
+                // Reached root, stop traversing
+                break
+            }
+            currentDir = parent
+        }
+
+        // Add ~/.caledger if not already in path and exists
+        if !paths.contains(homeConfigPath) && fileManager.fileExists(atPath: homeConfigPath.path) {
+            paths.append(homeConfigPath)
+        }
+
+        return paths
+    }
+
+    /// Find closest .caledger (for default behavior and map commands)
+    static func findConfigPath() -> URL? {
+        findAllConfigPaths().first
+    }
+
+    /// Path to the config file that was loaded (for map commands)
+    static var configPath: URL {
+        findConfigPath() ?? homeConfigPath
+    }
+
+    /// Merge direction for config loading
+    enum MergeMode {
+        case none       // Load closest only (default)
+        case back       // Load closest first, merge distant (closest wins)
+        case forward    // Load distant first, merge closer (closer wins)
+    }
+
+    /// Load configuration with optional merging
+    static func load(merge: MergeMode = .none) -> Config {
+        let allPaths = findAllConfigPaths()
+
+        guard !allPaths.isEmpty else {
+            return Config()
+        }
+
+        switch merge {
+        case .none:
+            // Just load the closest config
+            return loadSingle(from: allPaths[0])
+
+        case .back:
+            // Load closest first, merge distant (distant/parent wins conflicts)
+            // Iterate close->distant, each one overrides
+            var config = Config()
+            for path in allPaths {
+                config = mergeConfig(base: config, override: loadSingle(from: path))
+            }
+            return config
+
+        case .forward:
+            // Load distant first, merge closer (closer/local wins conflicts)
+            // Iterate distant->close, each one overrides
+            var config = Config()
+            for path in allPaths.reversed() {
+                config = mergeConfig(base: config, override: loadSingle(from: path))
+            }
             return config
         }
+    }
+
+    /// Load a single config file
+    private static func loadSingle(from path: URL) -> Config {
+        var config = Config()
+
+        guard let contents = try? String(contentsOf: path, encoding: .utf8) else {
+            return config
+        }
+
+        parseConfig(contents: contents, into: &config)
+        return config
+    }
+
+    /// Merge two configs (override values take precedence where set)
+    private static func mergeConfig(base: Config, override: Config) -> Config {
+        var result = base
+
+        // Override simple values if set
+        if !override.calendars.isEmpty { result.calendars = override.calendars }
+        if override.start != nil { result.start = override.start }
+        if override.end != nil { result.end = override.end }
+        if override.filter != nil { result.filter = override.filter }
+        if override.notes != nil { result.notes = override.notes }
+        if override.tag != nil { result.tag = override.tag }
+        if override.nomap != nil { result.nomap = override.nomap }
+        if override.dateBreak != nil { result.dateBreak = override.dateBreak }
+
+        // Merge mappings (override wins for same key)
+        for (key, value) in override.mappings {
+            result.mappings[key] = value
+        }
+
+        // Merge duplicate tracking
+        for key in override.duplicateMappingKeys {
+            if !result.duplicateMappingKeys.contains(key) {
+                result.duplicateMappingKeys.append(key)
+            }
+        }
+
+        return result
+    }
+
+    /// Parse config file contents into a Config struct
+    private static func parseConfig(contents: String, into config: inout Config) {
 
         for line in contents.components(separatedBy: .newlines) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -102,7 +216,6 @@ struct Config {
             }
         }
 
-        return config
     }
 
     /// Replace event title with mapped value if an exact match exists
@@ -312,10 +425,26 @@ struct List: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Add date headers between days")
     var `break`: Bool = false
 
+    @Flag(name: .long, help: "Merge configs from cwd to home (distant/parent wins)")
+    var configBack: Bool = false
+
+    @Flag(name: .long, help: "Merge configs from home to cwd (closer/local wins)")
+    var configForward: Bool = false
+
     // MARK: Execution
 
     func run() async throws {
-        let config = Config.load()
+        // Determine config merge mode
+        let mergeMode: Config.MergeMode
+        if configBack {
+            mergeMode = .back
+        } else if configForward {
+            mergeMode = .forward
+        } else {
+            mergeMode = .none
+        }
+
+        let config = Config.load(merge: mergeMode)
 
         // Command line options override config file values (CLI takes precedence if non-empty)
         let calendarNames = calendar.isEmpty ? config.calendars : calendar
