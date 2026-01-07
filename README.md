@@ -1,0 +1,122 @@
+# caledger
+
+A macOS CLI tool for reading calendar entries and outputting them in a ledger-compatible format.
+
+## Installation
+
+Build the project in Xcode, then copy the executable to your PATH:
+
+```bash
+cp ~/Library/Developer/Xcode/DerivedData/caledger-*/Build/Products/Debug/caledger /usr/local/bin/
+```
+
+On first run, macOS will prompt for calendar access. Grant permission in System Settings > Privacy & Security > Calendars.
+
+## Usage
+
+```bash
+caledger ls [OPTIONS]
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-c, --calendar <name>` | Calendar name(s) to read from (repeatable, default: all calendars) |
+| `-s, --start <date>` | Start date (YYYY-MM-DD or relative) |
+| `-e, --end <date>` | End date (YYYY-MM-DD or relative) |
+| `-f, --filter <text>` | Filter events by title (case-insensitive) |
+| `-t, --tag` | Tag output with calendar name |
+| `-n, --notes` | Include event notes appended to title |
+| `--nomap` | Skip title mappings from config |
+| `-h, --help` | Show help |
+
+### Relative Dates
+
+Dates can be absolute (`YYYY-MM-DD`) or relative using these units:
+
+| Unit | Meaning |
+|------|---------|
+| `y` | year |
+| `q` | quarter (3 months) |
+| `m` | month |
+| `w` | week |
+| `d` | day |
+
+Examples: `-1y`, `+3m`, `-2w4d`, `+1q`
+
+### Output Format
+
+```
+i YYYY-MM-DD HH:MM:SS title    notes
+; :CalendarName:
+o YYYY-MM-DD HH:MM:SS
+```
+
+- `i` line: event start time and title (with notes if `-n`)
+- `; :CalendarName:` line: calendar tag (if `-t`)
+- `o` line: event end time
+
+## Mapping Commands
+
+Manage title mappings that replace event titles in output:
+
+```bash
+caledger map ls              # list all mappings
+caledger map ls -f <text>    # filter mappings
+caledger map add <key> <val> # add or update mapping
+caledger map rm <key>        # remove mapping
+```
+
+## Configuration File
+
+Create `~/.caledger` to set defaults:
+
+```
+; Settings
+calendar = Work, Personal
+start = -1m
+end = +0d
+filter = wb
+
+; Boolean flags
+notes
+notag
+nomap
+
+; Title mappings (event title = replacement)
+wb12345 = expenses:travel:client
+proj-abc = income:consulting:acme
+```
+
+### Config Options
+
+| Key | Description |
+|-----|-------------|
+| `calendar` | Default calendar(s), comma-separated |
+| `start` | Default start date |
+| `end` | Default end date |
+| `filter` | Default title filter |
+| `notes` / `nonotes` | Enable/disable notes |
+| `tag` / `notag` | Enable/disable calendar tags |
+| `map` / `nomap` | Enable/disable title mappings |
+
+Any unrecognized key is treated as a title mapping.
+
+Command line options override config file values.
+
+## Examples
+
+```bash
+# List all events from last month
+caledger ls -s -1m -e +0d
+
+# List events from specific calendars with tags
+caledger ls -c Work -c Personal -t
+
+# Filter events and include notes
+caledger ls -f "meeting" -n
+
+# Use relative dates
+caledger ls -s -1q -e +1w
+```
