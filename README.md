@@ -28,6 +28,7 @@ caledger ls [OPTIONS]
 | `-f, --filter <text>` | Filter events by title (case-insensitive) |
 | `-t, --tag` | Tag output with calendar name |
 | `-n, --notes` | Include event notes appended to title |
+| `-b, --break` | Add date headers between days |
 | `--nomap` | Skip title mappings from config |
 | `-h, --help` | Show help |
 
@@ -48,11 +49,13 @@ Examples: `-1y`, `+3m`, `-2w4d`, `+1q`
 ### Output Format
 
 ```
-i YYYY-MM-DD HH:MM:SS title    notes
+### 2026-01-06 Monday ###
+i 2026-01-06 10:00:00 title    notes
 ; :CalendarName:
-o YYYY-MM-DD HH:MM:SS
+o 2026-01-06 11:00:00
 ```
 
+- `### YYYY-MM-DD Day ###` header: date separator (if `-b`)
 - `i` line: event start time and title (with notes if `-n`)
 - `; :CalendarName:` line: calendar tag (if `-t`)
 - `o` line: event end time
@@ -99,6 +102,7 @@ proj-abc = income:consulting:acme
 | `filter` | Default title filter |
 | `notes` / `nonotes` | Enable/disable notes |
 | `tag` / `notag` | Enable/disable calendar tags |
+| `break` / `nobreak` | Enable/disable date headers |
 | `map` / `nomap` | Enable/disable title mappings |
 
 Any unrecognized key is treated as a title mapping.

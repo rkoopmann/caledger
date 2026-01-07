@@ -39,6 +39,7 @@ struct Config {
     var notes: Bool?              // Default for -n flag (nil = use CLI default)
     var tag: Bool?                // Default for -t flag (nil = use CLI default)
     var nomap: Bool?              // Default for --nomap flag (nil = use CLI default)
+    var dateBreak: Bool?          // Default for -b/--break flag (nil = use CLI default)
     var mappings: [String: String] = [:]  // Event title -> replacement mappings
     var duplicateMappingKeys: [String] = []  // Keys that appeared more than once
 
@@ -60,7 +61,7 @@ struct Config {
             // Skip empty lines and comments
             if trimmed.isEmpty || trimmed.hasPrefix(";") { continue }
 
-            // Handle boolean flags (no = sign): notes, nonotes, tag, notag, map, nomap
+            // Handle boolean flags (no = sign): notes, nonotes, tag, notag, map, nomap, break, nobreak
             if !trimmed.contains("=") {
                 switch trimmed {
                 case "notes": config.notes = true
@@ -69,6 +70,8 @@ struct Config {
                 case "notag": config.tag = false
                 case "map": config.nomap = false
                 case "nomap": config.nomap = true
+                case "break": config.dateBreak = true
+                case "nobreak": config.dateBreak = false
                 default: break
                 }
                 continue
@@ -306,6 +309,9 @@ struct List: AsyncParsableCommand {
     @Flag(name: .long, help: "Skip title mappings from config")
     var nomap: Bool = false
 
+    @Flag(name: .shortAndLong, help: "Add date headers between days")
+    var `break`: Bool = false
+
     // MARK: Execution
 
     func run() async throws {
@@ -319,6 +325,7 @@ struct List: AsyncParsableCommand {
         let includeNotes = notes || (config.notes ?? false)
         let includeTag = tag || (config.tag ?? false)
         let skipMapping = nomap || (config.nomap ?? false)
+        let includeDateBreak = `break` || (config.dateBreak ?? false)
 
         // Request calendar access from macOS
         let granted = await CalendarService.requestAccess()
@@ -362,7 +369,26 @@ struct List: AsyncParsableCommand {
         }
 
         // Output events sorted chronologically
+        var lastDate: String? = nil
+        let dateOnlyFormatter = DateFormatter()
+        dateOnlyFormatter.dateFormat = "yyyy-MM-dd"
+        let dayOfWeekFormatter = DateFormatter()
+        dayOfWeekFormatter.dateFormat = "EEEE"
+
         for event in events.sorted(by: { $0.startDate < $1.startDate }) {
+            // Add date header if date changed and break is enabled
+            if includeDateBreak {
+                let eventDate = dateOnlyFormatter.string(from: event.startDate)
+                if eventDate != lastDate {
+                    let dayOfWeek = dayOfWeekFormatter.string(from: event.startDate)
+                    if lastDate != nil {
+                        print("")  // Blank line before header (except first)
+                    }
+                    print("### \(eventDate) \(dayOfWeek) ###")
+                    lastDate = eventDate
+                }
+            }
+
             print(CalendarService.formatEvent(event, config: config, includeCalendar: includeTag, includeNotes: includeNotes, skipMapping: skipMapping))
         }
     }
