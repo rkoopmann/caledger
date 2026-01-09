@@ -34,19 +34,21 @@ caledger ls [OPTIONS]
 | `--config-forward` | Merge all configs, closer/local wins conflicts |
 | `-h, --help` | Show help |
 
-### Relative Dates
+### Relative Dates & Times
 
-Dates can be absolute (`YYYY-MM-DD`) or relative using these units:
+Dates/times can be absolute (`YYYY-MM-DD` or `YYYY-MM-DD HH:MM`) or relative using these units:
 
-| Unit | Meaning |
-|------|---------|
-| `y` | year |
-| `q` | quarter (3 months) |
-| `m` | month |
-| `w` | week |
-| `d` | day |
+| Unit | Meaning | Type |
+|------|---------|------|
+| `Y` | year | date |
+| `Q` | quarter (3 months) | date |
+| `M` | month | date |
+| `W` | week | date |
+| `D` | day | date |
+| `h` | hour | time |
+| `m` | minute | time |
 
-Examples: `-1y`, `+3m`, `-2w4d`, `+1q`
+Examples: `-1Y`, `+3M`, `-2W4D`, `+1h30m`, `-10m`
 
 ### Output Format
 
@@ -61,6 +63,39 @@ o 2026-01-06 11:00:00
 - `i` line: event start time and title (with notes if `-n`)
 - `; :CalendarName:` line: calendar tag (if `-t`)
 - `o` line: event end time
+
+## Creating Events
+
+Create calendar events with the `mk` command:
+
+```bash
+caledger mk -c <calendar> -t <title> [-s <start>] [-e <end>] [-n <notes>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-c, --calendar` | Calendar to add event to (required) |
+| `-t, --title` | Event title (required) |
+| `-s, --start` | Start time (default: now) |
+| `-e, --end` | End time (default: +1h from start) |
+| `-n, --notes` | Event notes |
+| `--nomap` | Don't expand title using mappings |
+
+Examples:
+
+```bash
+# Create event starting now, ending in 1 hour
+caledger mk -c Work -t "Quick meeting"
+
+# Create event with specific times
+caledger mk -c Work -t "Lunch" -s "2026-01-07 12:00" -e "2026-01-07 13:00"
+
+# Create event using relative times
+caledger mk -c tracked -t "Just did this" -s "-10m" -e "+0m"
+
+# Create event with notes
+caledger mk -c Personal -t "Call mom" -s "+1h" -n "Remember to ask about weekend"
+```
 
 ## Mapping Commands
 

@@ -231,9 +231,175 @@ struct Caledger: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "caledger",
         abstract: "A tool for reading calendar entries",
-        subcommands: [List.self, Map.self],
+        subcommands: [List.self, Make.self, Map.self],
         defaultSubcommand: List.self
     )
+}
+
+// MARK: - Make Command
+
+/// Create a new calendar event
+struct Make: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "mk",
+        abstract: "Create a new calendar event"
+    )
+
+    @Option(name: .shortAndLong, help: "Calendar to add event to (default: from config)")
+    var calendar: String?
+
+    @Option(name: .shortAndLong, help: "Event title (required)")
+    var title: String
+
+    @Option(name: .shortAndLong, help: "Start time (YYYY-MM-DD HH:MM or relative, default: now)")
+    var start: String?
+
+    @Option(name: .shortAndLong, help: "End time (YYYY-MM-DD HH:MM or relative, default: +1h)")
+    var end: String?
+
+    @Option(name: .shortAndLong, help: "Event notes")
+    var notes: String?
+
+    @Flag(name: .long, help: "Don't expand title using mappings")
+    var nomap: Bool = false
+
+    func run() async throws {
+        let config = Config.load()
+
+        // Resolve calendar name: CLI option > config default
+        let calendarName: String
+        if let cliCalendar = calendar {
+            calendarName = cliCalendar
+        } else if let configCalendar = config.calendars.first {
+            calendarName = configCalendar
+        } else {
+            print("No calendar specified. Use -c/--calendar or set 'calendar' in ~/.caledger")
+            throw ExitCode.failure
+        }
+
+        let granted = await CalendarService.requestAccess()
+
+        guard granted else {
+            print("Calendar access denied. Please grant access in System Settings > Privacy & Security > Calendars.")
+            throw ExitCode.failure
+        }
+
+        guard let cal = CalendarService.findCalendar(named: calendarName) else {
+            print("Calendar '\(calendarName)' not found.")
+            print("Available calendars:")
+            for c in CalendarService.allCalendars() {
+                print("  - \(c.title)")
+            }
+            throw ExitCode.failure
+        }
+
+        // Parse start time (default: now)
+        let startDate = start.flatMap { parseDateTime($0) } ?? Date()
+
+        // Parse end time (default: 1 hour after start)
+        let endDate: Date
+        if let endStr = end {
+            endDate = parseDateTime(endStr) ?? Calendar.current.date(byAdding: .hour, value: 1, to: startDate)!
+        } else {
+            endDate = Calendar.current.date(byAdding: .hour, value: 1, to: startDate)!
+        }
+
+        // Apply title mapping unless --nomap
+        let eventTitle = nomap ? title : config.mapTitle(title)
+
+        // Create the event
+        try CalendarService.createEvent(
+            title: eventTitle,
+            startDate: startDate,
+            endDate: endDate,
+            notes: notes,
+            calendar: cal
+        )
+
+        // Format output
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        print("Created event:")
+        print("  Title: \(eventTitle)")
+        print("  Start: \(dateFormatter.string(from: startDate))")
+        print("  End:   \(dateFormatter.string(from: endDate))")
+        print("  Calendar: \(cal.title)")
+    }
+
+    /// Parse date/time string - supports absolute and relative formats
+    func parseDateTime(_ string: String) -> Date? {
+        // Try absolute datetime first (YYYY-MM-DD HH:MM:SS or YYYY-MM-DD HH:MM)
+        let dateTimeFormatter = DateFormatter()
+        dateTimeFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        if let date = dateTimeFormatter.date(from: string) {
+            return date
+        }
+        dateTimeFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+        if let date = dateTimeFormatter.date(from: string) {
+            return date
+        }
+
+        // Try absolute date only (YYYY-MM-DD)
+        dateTimeFormatter.dateFormat = "yyyy-MM-dd"
+        if let date = dateTimeFormatter.date(from: string) {
+            return date
+        }
+
+        // Try relative date/time
+        return parseRelativeDateTime(string)
+    }
+
+    /// Parse relative date/time like "-10m", "+1h30m", "-1D"
+    func parseRelativeDateTime(_ string: String) -> Date? {
+        guard !string.isEmpty else { return nil }
+
+        var str = string
+        let isNegative: Bool
+
+        if str.hasPrefix("-") {
+            isNegative = true
+            str.removeFirst()
+        } else if str.hasPrefix("+") {
+            isNegative = false
+            str.removeFirst()
+        } else {
+            isNegative = false
+        }
+
+        var result = Date()
+        let calendar = Calendar.current
+
+        let pattern = /(\d+)([YQMWDhm])/
+        let matches = str.matches(of: pattern)
+
+        guard !matches.isEmpty else { return nil }
+
+        for match in matches {
+            guard let value = Int(match.1) else { continue }
+            let unit = String(match.2)
+            let signedValue = isNegative ? -value : value
+
+            let component: Calendar.Component
+            var multiplier = 1
+
+            switch unit {
+            case "Y": component = .year
+            case "Q": component = .month; multiplier = 3
+            case "M": component = .month
+            case "W": component = .day; multiplier = 7
+            case "D": component = .day
+            case "h": component = .hour
+            case "m": component = .minute
+            default: continue
+            }
+
+            if let newDate = calendar.date(byAdding: component, value: signedValue * multiplier, to: result) {
+                result = newDate
+            }
+        }
+
+        return result
+    }
 }
 
 // MARK: - Map Command
@@ -549,14 +715,16 @@ struct List: AsyncParsableCommand {
         return parseRelativeDate(string)
     }
 
-    /// Parse relative date strings like "-3m4d" or "+1y2w"
+    /// Parse relative date/time strings like "-3M4D" or "+1h30m"
     ///
-    /// Supported units:
-    /// - y: year
-    /// - q: quarter (3 months)
-    /// - m: month
-    /// - w: week (7 days)
-    /// - d: day
+    /// Supported units (uppercase = date, lowercase = time):
+    /// - Y: year
+    /// - Q: quarter (3 months)
+    /// - M: month
+    /// - W: week (7 days)
+    /// - D: day
+    /// - h: hour
+    /// - m: minute
     func parseRelativeDate(_ string: String) -> Date? {
         guard !string.isEmpty else { return nil }
 
@@ -577,8 +745,8 @@ struct List: AsyncParsableCommand {
         var result = Date()
         let calendar = Calendar.current
 
-        // Parse number+unit pairs like "3m4d" -> [(3, "m"), (4, "d")]
-        let pattern = /(\d+)([yqmwd])/
+        // Parse number+unit pairs like "3M4D" or "1h30m"
+        let pattern = /(\d+)([YQMWDhm])/
         let matches = str.matches(of: pattern)
 
         guard !matches.isEmpty else { return nil }
@@ -593,11 +761,13 @@ struct List: AsyncParsableCommand {
 
             // Map unit character to Calendar.Component
             switch unit {
-            case "y": component = .year
-            case "q": component = .month; multiplier = 3  // Quarter = 3 months
-            case "m": component = .month
-            case "w": component = .day; multiplier = 7    // Week = 7 days
-            case "d": component = .day
+            case "Y": component = .year
+            case "Q": component = .month; multiplier = 3  // Quarter = 3 months
+            case "M": component = .month
+            case "W": component = .day; multiplier = 7    // Week = 7 days
+            case "D": component = .day
+            case "h": component = .hour
+            case "m": component = .minute
             default: continue
             }
 
@@ -646,6 +816,18 @@ enum CalendarService {
             calendars: calendars
         )
         return eventStore.events(matching: predicate)
+    }
+
+    /// Create a new calendar event
+    static func createEvent(title: String, startDate: Date, endDate: Date, notes: String?, calendar: EKCalendar) throws {
+        let event = EKEvent(eventStore: eventStore)
+        event.title = title
+        event.startDate = startDate
+        event.endDate = endDate
+        event.notes = notes
+        event.calendar = calendar
+
+        try eventStore.save(event, span: .thisEvent)
     }
 
     /// Format an event for output
